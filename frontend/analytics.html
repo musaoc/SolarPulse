@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Historical Solar & Grid Analytics — SolarPulse</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/analytics.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="analytics-body">
+  <div class="app-background">
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
+  </div>
+
+  <div class="dashboard-container">
+    <!-- Top Navigation Header -->
+    <header class="dashboard-header glass-panel">
+      <div class="brand-group">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5" fill="#f59e0b" stroke="#d97706" />
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="#f59e0b" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">SOLARPULSE</div>
+          <div class="brand-subtitle">ENERGY ANALYTICS & REPORTS</div>
+        </div>
+      </div>
+
+      <!-- Main Screen Navigation Switcher -->
+      <nav class="nav-switcher">
+        <a href="/" class="nav-tab">
+          <span class="nav-icon">⚡</span> Real-Time Monitor
+        </a>
+        <a href="/analytics" class="nav-tab active">
+          <span class="nav-icon">📊</span> Historical Analytics
+        </a>
+      </nav>
+
+      <div class="header-right-meta">
+        <button class="tariff-chip" id="btn-edit-tariff" title="Configure Electricity Tariff">
+          <span class="tariff-icon">🇵🇰</span>
+          <span class="tariff-label">Tariff:</span>
+          <span class="tariff-val" id="header-tariff-val">65.0 PKR/kWh</span>
+          <span class="edit-hint">✎</span>
+        </button>
+        <button class="btn-csv-export" id="btn-export-csv" title="Download historical data as CSV">
+          <span class="export-icon">⬇</span> Export CSV
+        </button>
+      </div>
+    </header>
+
+    <!-- Analytics Toolbar & Range Selectors -->
+    <div class="analytics-toolbar glass-panel">
+      <div class="toolbar-top-row">
+        <div class="toolbar-left">
+          <span class="toolbar-label">Quick Horizon:</span>
+          <div class="range-pill-group">
+            <button class="analytics-range-btn active" data-range="today">Today</button>
+            <button class="analytics-range-btn" data-range="yesterday">Yesterday</button>
+            <button class="analytics-range-btn" data-range="7d">Last 7 Days</button>
+            <button class="analytics-range-btn" data-range="this_month">This Month</button>
+            <button class="analytics-range-btn" data-range="all">All Time</button>
+          </div>
+        </div>
+        <div class="toolbar-right">
+          <span class="data-range-label" id="active-range-label">Showing Today</span>
+        </div>
+      </div>
+
+      <div class="toolbar-filter-row">
+        <div class="filter-group">
+          <label class="filter-label" for="filter-start-date">
+            <span class="filter-icon">📅</span> From:
+          </label>
+          <div class="input-composite">
+            <input type="date" id="filter-start-date" class="date-input" title="Start Date">
+            <div class="time-input-wrap">
+              <input type="text" id="filter-start-time" class="time-input time-input-24h" value="00:00" placeholder="00:00" maxlength="5" pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$" title="Start Time in 24h format (HH:MM, e.g. 10:00)">
+              <span class="time-hint-tag">24h</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="filter-end-date">
+            <span class="filter-icon">🕒</span> To:
+          </label>
+          <div class="input-composite">
+            <input type="date" id="filter-end-date" class="date-input" title="End Date">
+            <div class="time-input-wrap">
+              <input type="text" id="filter-end-time" class="time-input time-input-24h" value="23:59" placeholder="23:59" maxlength="5" pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$" title="End Time in 24h format (HH:MM, e.g. 18:30)">
+              <span class="time-hint-tag">24h</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="filter-actions">
+          <button class="btn-apply-filter" id="btn-apply-filter" title="Apply Date & Time Filter">
+            <span class="btn-icon">⚡</span> Apply Filter
+          </button>
+          <button class="btn-now-shortcut" id="btn-set-now" title="Set 'To' time to current local time">
+            Now
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 Hero KPI Cards -->
+    <section class="kpi-grid">
+      <!-- KPI 1: Solar Generation -->
+      <div class="kpi-card solar-kpi glass-panel">
+        <div class="kpi-header">
+          <div class="kpi-icon-wrap icon-solar">☀️</div>
+          <div class="kpi-title-wrap">
+            <span class="kpi-title">Solar Energy Generated</span>
+            <span class="kpi-sub">Total Clean PV Production</span>
+          </div>
+        </div>
+        <div class="kpi-main-val" id="kpi-solar-kwh">0.00 <span class="kpi-unit">kWh</span></div>
+        <div class="kpi-stats-row">
+          <div class="kpi-stat">
+            <span class="kpi-stat-label">Peak Generation:</span>
+            <span class="kpi-stat-value" id="kpi-solar-peak">0 W</span>
+          </div>
+          <div class="kpi-stat">
+            <span class="kpi-stat-label">Peak Occurred:</span>
+            <span class="kpi-stat-value highlight-solar" id="kpi-solar-peak-time">--</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI 2: WAPDA Grid Imported -->
+      <div class="kpi-card grid-kpi glass-panel">
+        <div class="kpi-header">
+          <div class="kpi-icon-wrap icon-grid">⚡</div>
+          <div class="kpi-title-wrap">
+            <span class="kpi-title">Grid Imported</span>
+            <span class="kpi-sub">Grid Electricity Consumed</span>
+          </div>
+        </div>
+        <div class="kpi-main-val" id="kpi-grid-kwh">0.00 <span class="kpi-unit">kWh</span></div>
+        <div class="kpi-stats-row">
+          <div class="kpi-stat">
+            <span class="kpi-stat-label">Peak Grid Load:</span>
+            <span class="kpi-stat-value" id="kpi-grid-peak">0 W</span>
+          </div>
+          <div class="kpi-stat">
+            <span class="kpi-stat-label">Est. Grid Cost:</span>
+            <span class="kpi-stat-value highlight-grid" id="kpi-grid-cost">Rs 0.00</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI 3: Household Consumption -->
+      <div class="kpi-card load-kpi glass-panel">
+        <div class="kpi-header">
+          <div class="kpi-icon-wrap icon-load">🏠</div>
+          <div class="kpi-title-wrap">
+            <span class="kpi-title">Home Load Consumed</span>
+            <span class="kpi-sub">Total Household Energy</span>
+          </div>
+        </div>
+        <div class="kpi-main-val" id="kpi-load-kwh">0.00 <span class="kpi-unit">kWh</span></div>
+        <div class="kpi-stats-row">
+          <div class="kpi-stat">
+            <span class="kpi-stat-label">Peak Load Demand:</span>
+            <span class="kpi-stat-value" id="kpi-load-peak">0 W</span>
+          </div>
+          <div class="kpi-stat">
+            <span class="kpi-stat-label">Peak Occurred:</span>
+            <span class="kpi-stat-value highlight-load" id="kpi-load-peak-time">--</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI 4: Autarky & Savings -->
+      <div class="kpi-card savings-kpi glass-panel">
+        <div class="kpi-header">
+          <div class="kpi-icon-wrap icon-savings">💰</div>
+          <div class="kpi-title-wrap">
+            <span class="kpi-title">Solar Savings & Independence</span>
+            <span class="kpi-sub">Grid-Free Financial Offset</span>
+          </div>
+        </div>
+        <div class="kpi-main-val" id="kpi-savings-pkr">Rs 0.00 <span class="kpi-unit">PKR</span></div>
+        <div class="kpi-stats-row">
+          <div class="kpi-stat">
+            <span class="kpi-stat-label">Grid Independence:</span>
+            <span class="kpi-stat-value highlight-autarky" id="kpi-autarky-pct">100%</span>
+          </div>
+          <div class="kpi-stat">
+            <span class="kpi-stat-label">Active Days Logged:</span>
+            <span class="kpi-stat-value" id="kpi-active-days">0 Days</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Filtered Time Power Flow Timeline Graph -->
+    <section class="filtered-power-section glass-panel">
+      <div class="chart-header">
+        <div class="chart-title-wrap">
+          <span class="chart-icon">⚡</span>
+          <div class="title-meta-group">
+            <span class="chart-title" id="filtered-power-title">Power Flow Timeline (Filtered Period)</span>
+            <span class="chart-subtitle" id="filtered-power-subtitle">Solar PV, Home Load, Utility Grid, Battery Charge &amp; Discharge</span>
+          </div>
+        </div>
+        <div class="chart-header-meta">
+          <div class="power-summary-chips" id="filtered-power-summary-chips">
+            <span class="chip chip-solar" id="chip-peak-solar">Peak Solar: --</span>
+            <span class="chip chip-load" id="chip-peak-load">Peak Load: --</span>
+            <span class="chip chip-grid" id="chip-peak-grid">Peak Grid: --</span>
+            <span class="chip chip-charge" id="chip-peak-charge">Peak Charge: --</span>
+            <span class="chip chip-discharge" id="chip-peak-discharge">Peak Discharge: --</span>
+          </div>
+          <span class="chart-badge highlight-badge" id="filtered-power-badge">Showing Today</span>
+        </div>
+      </div>
+      <div class="chart-canvas-wrap filtered-chart-canvas-wrap">
+        <canvas id="chart-filtered-power"></canvas>
+      </div>
+    </section>
+
+    <!-- Visual Charts Grid -->
+    <section class="charts-dual-grid">
+      <!-- Chart 1: Daily Energy Mix Stacked Bar Chart -->
+      <div class="chart-box glass-panel">
+        <div class="chart-header">
+          <div class="chart-title-wrap">
+            <span class="chart-icon">📊</span>
+            <span class="chart-title">Daily Energy Production & Consumption</span>
+          </div>
+          <span class="chart-badge">Stacked Daily kWh</span>
+        </div>
+        <div class="chart-canvas-wrap">
+          <canvas id="chart-daily-mix"></canvas>
+        </div>
+      </div>
+
+      <!-- Chart 2: 24-Hour Profile for Selected Day -->
+      <div class="chart-box glass-panel">
+        <div class="chart-header">
+          <div class="chart-title-wrap">
+            <span class="chart-icon">📈</span>
+            <span class="chart-title" id="profile-chart-title">24-Hour Profile (Hourly Distribution)</span>
+          </div>
+          <span class="chart-badge" id="profile-date-badge">Select a day below</span>
+        </div>
+        <div class="chart-canvas-wrap">
+          <canvas id="chart-hourly-profile"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Detailed Day-by-Day Historical Rollup Table -->
+    <section class="table-section glass-panel">
+      <div class="table-header-row">
+        <div class="table-title-wrap">
+          <span class="table-icon">📋</span>
+          <span class="table-title">Day-by-Day Historical Breakdown</span>
+        </div>
+        <div class="table-actions">
+          <span class="table-hint">Click "Inspect 24h" on any row to view its hourly curve above</span>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table class="analytics-table" id="analytics-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Solar Gen (kWh)</th>
+              <th>Grid Imported (kWh)</th>
+              <th>Home Load (kWh)</th>
+              <th>Peak Solar (W)</th>
+              <th>Peak Load (W)</th>
+              <th>Peak Grid (W)</th>
+              <th>Independence (%)</th>
+              <th>Savings (PKR)</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr>
+              <td colspan="10" class="table-loading">Loading historical telemetry records...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="dashboard-footer glass-panel">
+      <div class="footer-meta-item">
+        <span class="footer-label">INVERTER</span>
+        <span class="footer-value">Knox ECO 5000 (PI30 Protocol)</span>
+      </div>
+      <div class="footer-meta-item">
+        <span class="footer-label">DATA LOGGING</span>
+        <span class="footer-value">High-Frequency Local SQLite (1s Cadence)</span>
+      </div>
+      <div class="footer-meta-item">
+        <span class="footer-label">CURRENCY TARIFF</span>
+        <span class="footer-value" id="footer-tariff-display">65.0 PKR / Unit</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Tariff Configuration Modal -->
+  <div class="modal-overlay hidden" id="tariff-modal">
+    <div class="modal-card glass-panel">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-icon">🇵🇰</span>
+          <h3>Configure Electricity Tariff</h3>
+        </div>
+        <button class="modal-close" id="btn-close-tariff">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-description">
+          Set your local per-unit electricity tariff rate to calculate exact financial savings and utility grid electricity costs.
+        </p>
+        <div class="form-group">
+          <label for="input-tariff-rate">Electricity Rate (PKR per kWh / Unit)</label>
+          <input type="number" id="input-tariff-rate" class="input-field" step="0.5" min="1" max="250" value="65.0">
+          <small class="field-hint">Standard peak/off-peak average is typically between 55 and 75 PKR.</small>
+        </div>
+        <button class="btn-primary" id="btn-save-tariff">Save & Recalculate</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/analytics.js"></script>
+</body>
+</html>

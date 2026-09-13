@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SolarPulse — Local Real-Time Solar Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css" />
+  <!-- Chart.js and date adapter for fast time-series charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation / Header -->
+    <header class="app-header">
+      <div class="brand-group">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5" fill="#f59e0b" stroke="#d97706" />
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="#f59e0b" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">SOLARPULSE</div>
+          <div class="brand-subtitle">LOCAL REAL-TIME TELEMETRY</div>
+        </div>
+      </div>
+
+      <!-- Screen Navigation Switcher -->
+      <nav class="nav-switcher">
+        <a href="/" class="nav-tab active">
+          <span class="nav-icon">⚡</span> Real-Time Monitor
+        </a>
+        <a href="/analytics" class="nav-tab">
+          <span class="nav-icon">📊</span> Historical Analytics
+        </a>
+      </nav>
+
+      <div class="header-center-controls">
+        <div class="connection-pill" id="conn-pill">
+          <span class="status-dot pulse-active" id="conn-dot"></span>
+          <span id="conn-text">Connecting to local inverter...</span>
+        </div>
+        <div class="poll-rate-selector">
+          <span class="rate-label">Rate:</span>
+          <button class="rate-btn" data-rate="1">1s</button>
+          <button class="rate-btn active" data-rate="2">2s</button>
+          <button class="rate-btn" data-rate="5">5s</button>
+        </div>
+        <button class="btn-mqtt" id="btn-open-mqtt" title="Configure Home Assistant & MQTT Integration">
+          <span class="mqtt-icon">🏠</span> MQTT / HA
+          <span class="mqtt-status-dot" id="header-mqtt-dot"></span>
+        </button>
+        <button class="btn-cloud" id="btn-open-cloud" title="Cloud Server & Offline Gap Sync">
+          <span class="cloud-icon">☁️</span> Cloud Sync
+          <span class="cloud-status-dot" id="header-cloud-dot"></span>
+        </button>
+      </div>
+
+      <div class="header-right-meta">
+        <div class="live-clock" id="live-clock">--:--:--</div>
+        <div class="data-age" id="data-age">Waiting for frame...</div>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="dashboard-content">
+
+      <!-- Hero Power Flow Visualization -->
+      <section class="power-flow-section glass-panel">
+        <div class="section-header">
+          <div class="section-title">
+            <span class="sparkle-icon">⚡</span> Real-Time Energy Flow
+          </div>
+          <div class="mode-badge" id="operating-mode-badge">
+            <span class="mode-icon">🔄</span>
+            <span id="mode-name">LINE MODE (GRID)</span>
+          </div>
+        </div>
+
+        <div class="diagram-wrapper">
+          <!-- Animated SVG Flow Canvas -->
+          <svg id="power-flow-svg" class="flow-svg" viewBox="0 0 900 480">
+            <defs>
+              <!-- Glowing Filter -->
+              <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+              <!-- Linear Gradients for Pipes -->
+              <linearGradient id="solar-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#f59e0b" />
+                <stop offset="100%" stop-color="#fbbf24" />
+              </linearGradient>
+              <linearGradient id="grid-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#6366f1" />
+                <stop offset="100%" stop-color="#818cf8" />
+              </linearGradient>
+              <linearGradient id="battery-gradient" x1="0%" y1="100%" x2="0%" y2="0%">
+                <stop offset="0%" stop-color="#10b981" />
+                <stop offset="100%" stop-color="#34d399" />
+              </linearGradient>
+              <linearGradient id="load-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#f43f5e" />
+                <stop offset="100%" stop-color="#fb7185" />
+              </linearGradient>
+            </defs>
+
+            <!-- Pipe Tracks (Base Background Lines) -->
+            <path id="path-track-solar" class="wire-track" d="M 450 110 L 450 220" />
+            <path id="path-track-grid" class="wire-track" d="M 230 250 L 410 250" />
+            <path id="path-track-load" class="wire-track" d="M 490 250 L 670 250" />
+            <path id="path-track-battery" class="wire-track" d="M 450 280 L 450 390" />
+
+            <!-- Animated Flowing Lines (Dashes animate when active) -->
+            <path id="flow-solar" class="flow-pipe solar-flow" d="M 450 110 L 450 220" />
+            <path id="flow-grid" class="flow-pipe grid-flow" d="M 230 250 L 410 250" />
+            <path id="flow-load" class="flow-pipe load-flow" d="M 490 250 L 670 250" />
+            <path id="flow-battery" class="flow-pipe battery-flow" d="M 450 280 L 450 390" />
+          </svg>
+
+          <!-- Nodes Positioned Absolutely Over the Diagram -->
+          
+          <!-- Solar Node (Top) -->
+          <div class="diagram-node node-solar" id="node-solar">
+            <div class="node-icon-box solar-glow">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="12" r="5" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" stroke-width="2" />
+              </svg>
+            </div>
+            <div class="node-label">SOLAR ARRAY</div>
+            <div class="node-main-val" id="flow-val-pv">0 <span class="unit">W</span></div>
+            <div class="node-sub-val" id="flow-sub-pv">0.0 V • 0.0 A</div>
+          </div>
+
+          <!-- Utility Grid Node (Left) -->
+          <div class="diagram-node node-grid" id="node-grid">
+            <div class="node-icon-box grid-glow">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L4 22h16L12 2zM9 13h6M7 18h10" />
+              </svg>
+            </div>
+            <div class="node-label" id="flow-grid-label">UTILITY GRID</div>
+            <div class="node-main-val" id="flow-val-grid">0 <span class="unit">W</span></div>
+            <div class="node-sub-val" id="flow-sub-grid">238.8 V • 50.0 Hz</div>
+          </div>
+
+          <!-- Center Inverter Node -->
+          <div class="diagram-node node-inverter" id="node-inverter">
+            <div class="inverter-box">
+              <div class="inverter-brand">KNOX ECO</div>
+              <div class="inverter-chip">5000W</div>
+              <div class="inverter-status-row">
+                <span class="badge-mini" id="inverter-temp-badge">37°C</span>
+                <span class="badge-mini" id="inverter-bus-badge">395V Bus</span>
+              </div>
+              <div class="inverter-load-pill">
+                Load: <strong id="inverter-load-pct">11%</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Home Load Node (Right) -->
+          <div class="diagram-node node-load" id="node-load">
+            <div class="node-icon-box load-glow">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+              </svg>
+            </div>
+            <div class="node-label">HOME LOAD</div>
+            <div class="node-main-val" id="flow-val-load">377 <span class="unit">W</span></div>
+            <div class="node-sub-val" id="flow-sub-load">501 VA • 11%</div>
+          </div>
+
+          <!-- Battery Node (Bottom) -->
+          <div class="diagram-node node-battery" id="node-battery">
+            <div class="node-icon-box battery-glow">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="1" y="6" width="18" height="12" rx="2" />
+                <path d="M23 10v4" />
+                <path d="M5 10h4M7 8v4" id="bat-plus-symbol" />
+              </svg>
+            </div>
+            <div class="node-label">BATTERY BANK</div>
+            <div class="node-main-val" id="flow-val-bat">65 <span class="unit">%</span></div>
+            <div class="node-sub-val" id="flow-sub-bat">25.60 V • -51 W</div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Metric Cards Grid -->
+      <section class="cards-grid">
+        <!-- Solar PV Card -->
+        <div class="metric-card glass-panel card-solar">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="card-icon">☀️</span>
+              <span class="card-title">Solar Generation</span>
+            </div>
+            <span class="card-tag tag-solar" id="pv-status-tag">Inactive</span>
+          </div>
+          <div class="card-metric-hero">
+            <span class="val-huge" id="card-pv-w">0</span>
+            <span class="val-unit">Watts</span>
+          </div>
+          <div class="card-details-grid">
+            <div class="detail-item">
+              <span class="detail-label">PV Voltage</span>
+              <span class="detail-val" id="card-pv-v">0.0 V</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">PV Current</span>
+              <span class="detail-val" id="card-pv-i">0.0 A</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Harvest Today</span>
+              <span class="detail-val highlight-solar" id="card-pv-kwh">0.00 kWh</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Peak Today</span>
+              <span class="detail-val" id="card-pv-peak">0 W</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Battery Storage Card -->
+        <div class="metric-card glass-panel card-battery">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="card-icon">🔋</span>
+              <span class="card-title">Battery Storage</span>
+            </div>
+            <span class="card-tag tag-battery" id="card-bat-tag">Discharging</span>
+          </div>
+          <div class="card-metric-hero">
+            <span class="val-huge" id="card-bat-soc">65</span>
+            <span class="val-unit">%</span>
+            <span class="val-sub-inline" id="card-bat-v">25.60 V</span>
+          </div>
+          <!-- SOC Level Gauge -->
+          <div class="soc-bar-container">
+            <div class="soc-bar-fill" id="card-bat-bar" style="width: 65%;"></div>
+          </div>
+          <div class="card-details-grid">
+            <div class="detail-item">
+              <span class="detail-label">Charge Current</span>
+              <span class="detail-val" id="card-bat-charge-a">0 A</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Discharge Current</span>
+              <span class="detail-val" id="card-bat-discharge-a">2 A</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Net Power</span>
+              <span class="detail-val highlight-bat" id="card-bat-net-w">-51.2 W</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Charged Today</span>
+              <span class="detail-val" id="card-bat-charged-kwh">0.00 kWh</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Output Load Card -->
+        <div class="metric-card glass-panel card-load">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="card-icon">🏠</span>
+              <span class="card-title">Home Load</span>
+            </div>
+            <span class="card-tag tag-load" id="card-load-tag">Normal (11%)</span>
+          </div>
+          <div class="card-metric-hero">
+            <span class="val-huge" id="card-load-w">377</span>
+            <span class="val-unit">Watts</span>
+            <span class="val-sub-inline" id="card-load-va">501 VA</span>
+          </div>
+          <!-- Load Gauge -->
+          <div class="soc-bar-container">
+            <div class="soc-bar-fill load-fill" id="card-load-bar" style="width: 11%;"></div>
+          </div>
+          <div class="card-details-grid">
+            <div class="detail-item">
+              <span class="detail-label">Load Percentage</span>
+              <span class="detail-val" id="card-load-pct">11 %</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Output AC</span>
+              <span class="detail-val" id="card-load-ac">238.8 V @ 50 Hz</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Energy Consumed</span>
+              <span class="detail-val highlight-load" id="card-load-kwh">0.00 kWh</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Peak Load Today</span>
+              <span class="detail-val" id="card-load-peak">377 W</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- WAPDA / Grid Card -->
+        <div class="metric-card glass-panel card-grid">
+          <div class="card-header">
+            <div class="card-title-group">
+              <span class="card-icon">⚡</span>
+              <span class="card-title">Utility Grid</span>
+            </div>
+            <span class="card-tag tag-grid" id="card-grid-tag">Available</span>
+          </div>
+          <div class="card-metric-hero">
+            <span class="val-huge" id="card-grid-v">238.8</span>
+            <span class="val-unit">Volts</span>
+            <span class="val-sub-inline" id="card-grid-freq">50.0 Hz</span>
+          </div>
+          <div class="card-details-grid">
+            <div class="detail-item">
+              <span class="detail-label">Import Power</span>
+              <span class="detail-val" id="card-grid-w">377 W</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Grid Mode</span>
+              <span class="detail-val" id="card-grid-mode">Passthrough</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Grid Imported</span>
+              <span class="detail-val highlight-grid" id="card-grid-kwh">0.00 kWh</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Inverter Temp</span>
+              <span class="detail-val" id="card-temp">37 °C</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Historical Analytics Section -->
+      <section class="charts-section glass-panel">
+        <div class="charts-header">
+          <div class="charts-title-group">
+            <span class="charts-icon">📈</span>
+            <div>
+              <div class="charts-main-title">Telemetry Analytics & Historical Trends</div>
+              <div class="charts-sub-title">Interactive high-resolution data logged locally in SQLite</div>
+            </div>
+          </div>
+          <div class="time-range-controls">
+            <button class="range-btn active" data-range="1h">1 Hour</button>
+            <button class="range-btn" data-range="6h">6 Hours</button>
+            <button class="range-btn" data-range="24h">24 Hours</button>
+            <button class="range-btn" data-range="7d">7 Days</button>
+          </div>
+        </div>
+
+        <div class="charts-grid">
+          <!-- Chart 1: Power Dynamics (Generation, Load, Grid) -->
+          <div class="chart-card">
+            <div class="chart-card-title">Power Generation & Consumption (Watts)</div>
+            <div class="chart-container">
+              <canvas id="chart-power"></canvas>
+            </div>
+          </div>
+
+          <!-- Chart 2: Battery Current & Net Power -->
+          <div class="chart-card">
+            <div class="chart-card-title">Battery Current (Charge vs Discharge Amperes)</div>
+            <div class="chart-container">
+              <canvas id="chart-battery-current"></canvas>
+            </div>
+          </div>
+
+          <!-- Chart 3: Battery Voltage & State of Charge -->
+          <div class="chart-card">
+            <div class="chart-card-title">Battery Voltage (V) & State of Charge (SOC %)</div>
+            <div class="chart-container">
+              <canvas id="chart-battery-voltage"></canvas>
+            </div>
+          </div>
+
+          <!-- Chart 4: Grid Stability & Inverter Temperature -->
+          <div class="chart-card">
+            <div class="chart-card-title">Grid Voltage Stability (V) & Heat Sink Temp (°C)</div>
+            <div class="chart-container">
+              <canvas id="chart-grid-temp"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Hardware Information & Device Details -->
+      <footer class="system-footer glass-panel">
+        <div class="footer-col">
+          <span class="footer-label">Inverter Model</span>
+          <span class="footer-value">Voltronic / Axpert (PI30)</span>
+        </div>
+        <div class="footer-col">
+          <span class="footer-label">Inverter Serial</span>
+          <span class="footer-value font-mono" id="footer-inverter-sn">Detected on link</span>
+        </div>
+        <div class="footer-col">
+          <span class="footer-label">Data Logger PN</span>
+          <span class="footer-value font-mono" id="footer-dongle-pn">Detected via FC=1</span>
+        </div>
+        <div class="footer-col">
+          <span class="footer-label">Local Connection</span>
+          <span class="footer-value font-mono" id="footer-conn-ip">-- : 8899</span>
+        </div>
+        <div class="footer-col">
+          <span class="footer-label">Database Storage</span>
+          <span class="footer-value" id="footer-sample-count">Logging locally in SQLite</span>
+        </div>
+      </footer>
+
+    </main>
+  </div>
+
+  <!-- Home Assistant & MQTT Configuration Modal -->
+  <div class="modal-overlay" id="mqtt-modal" style="display: none;">
+    <div class="modal-card glass-panel">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🏠</span>
+          <div>
+            <div class="modal-title">Home Assistant & MQTT Integration</div>
+            <div class="modal-subtitle">Auto-publish telemetry & auto-discover entities</div>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="btn-close-mqtt">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="modal-alert">
+          <span class="alert-icon">💡</span>
+          <span><strong>Auto-Discovery Enabled</strong>: Home Assistant will automatically detect all 14 sensors (load, battery %, PV, grid) without any YAML configuration.</span>
+        </div>
+
+        <div class="form-group-toggle">
+          <label for="mqtt-enabled" class="toggle-label">Enable MQTT Publishing</label>
+          <input type="checkbox" id="mqtt-enabled" class="toggle-input">
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="mqtt-broker">Broker Host / IP</label>
+            <input type="text" id="mqtt-broker" placeholder="e.g. 192.168.0.50" class="input-field">
+            <small class="field-hint">Home Assistant IP or Mosquitto broker IP</small>
+          </div>
+          <div class="form-group">
+            <label for="mqtt-port">Port</label>
+            <input type="number" id="mqtt-port" value="1883" class="input-field">
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="mqtt-username">Username (Optional)</label>
+            <input type="text" id="mqtt-username" placeholder="mqtt_user" class="input-field">
+          </div>
+          <div class="form-group">
+            <label for="mqtt-password">Password (Optional)</label>
+            <input type="password" id="mqtt-password" placeholder="••••••••" class="input-field">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="mqtt-topic">Topic Prefix</label>
+          <input type="text" id="mqtt-topic" value="solar/knox" class="input-field">
+          <small class="field-hint">Publishes to <code>solar/knox/load_w</code>, <code>solar/knox/battery_soc</code>, etc.</small>
+        </div>
+
+        <div class="mqtt-status-bar">
+          <span class="status-label">Broker Status:</span>
+          <span class="status-badge-mqtt" id="modal-mqtt-status">Checking...</span>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btn-cancel-mqtt">Cancel</button>
+        <button class="btn-primary" id="btn-save-mqtt">Save & Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cloud Server & Offline Gap Recovery Modal -->
+  <div class="modal-overlay hidden" id="cloud-modal">
+    <div class="modal-card glass-panel">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">☁️</span>
+          <div>
+            <h3>Cloud Server & Offline Gap Sync</h3>
+            <p class="modal-subtitle">Auto-syncs stats recorded while this PC was turned off</p>
+          </div>
+        </div>
+        <button class="modal-close" id="btn-close-cloud">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-row-toggle">
+          <div>
+            <div class="toggle-title">Enable Cloud Sync Bridge</div>
+            <div class="toggle-desc">Automatically backfill telemetry & energy when laptop boots up</div>
+          </div>
+          <input type="checkbox" id="cloud-enabled" class="toggle-input" checked>
+        </div>
+
+        <div class="cloud-info-card">
+          <div class="info-row">
+            <span class="info-label">Sync Status:</span>
+            <span class="info-value" id="cloud-sync-status">Checking...</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Last Cloud Timestamp:</span>
+            <span class="info-value" id="cloud-last-gts">--</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Last Check Time:</span>
+            <span class="info-value" id="cloud-last-sync">--</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="cloud-url">Cloud Server URL</label>
+          <input type="text" id="cloud-url" class="input-field" spellcheck="false">
+          <small class="field-hint">ValueClouds / DESS querySPDeviceLastData endpoint</small>
+        </div>
+
+        <div class="form-group">
+          <label for="cloud-token">Session Token</label>
+          <input type="text" id="cloud-token" class="input-field" spellcheck="false">
+        </div>
+
+        <div class="form-group">
+          <label for="cloud-auth">Auth JWT Header</label>
+          <input type="password" id="cloud-auth" class="input-field">
+          <small class="field-hint">Captured from your browser session on dessmonitor.com</small>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btn-trigger-sync">🔄 Sync Now</button>
+        <button class="btn-primary" id="btn-save-cloud">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

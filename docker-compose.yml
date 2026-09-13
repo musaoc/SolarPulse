@@ -1,0 +1,20 @@
+services:
+  solarpulse:
+    build: .
+    container_name: solarpulse
+    restart: unless-stopped
+    # host networking allows direct UDP/TCP communication with the local Wi-Fi dongle
+    network_mode: host
+    environment:
+      - DONGLE_IP=192.168.0.100
+      - DONGLE_UDP_PORT=58899
+      - COLLECTOR_TCP_PORT=8899
+      - WEB_PORT=8500
+      - POLL_INTERVAL=2.0
+      - CURRENCY=USD
+      - TARIFF_RATE=0.20
+      - GRID_LABEL=Utility Grid
+    volumes:
+      - ./data:/app/data
+      - ./solar_history.db:/app/solar_history.db
+      - ./.env:/app/.env:ro

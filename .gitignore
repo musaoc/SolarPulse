@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+.venv/
+ENV/
+env/
+
+# Local SQLite Database & WAL logs
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+solar_history.db
+
+# Environment & Local Credentials
+.env
+cloud_config.json
+mqtt_config.json
+tariff_config.json
+
+# Logs
+*.log
+
+# OS & IDE Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local personal backups & profiles
+*.local.md
+*.backup
+system_profile.md
