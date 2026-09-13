@@ -150,15 +150,14 @@ The SolarPulse parser breaks this down into exact measurements:
 The Grid Watts value displayed on the dashboard is **calculated from actual physical measurements taken by the inverter's internal sensors**.
 
 Here is the exact electrical reality:
-1. **In Line Mode (`L`) / Grid Bypass**:
-   The inverter has an internal contactor (relay) that connects Grid AC Input directly to Home AC Output.
-   - The power flowing through the inverter to your house is directly measured by the inverter's internal Current Transformer (CT) and Voltage ADC as `output_active_power` (e.g. `365 W`).
-   - If the battery is simultaneously being charged by the Grid, the battery charger draws additional power:
-     $$\text{Charger Power} = \frac{\text{Battery Voltage} \times \text{Charge Current}}{\text{Charger Efficiency} (\approx 90\%)}$$
-   - Therefore, Total Grid Import Power is:
-     $$\text{Grid Watts} = \text{Measured Home Active Power} + \text{Battery Charging Power}$$
-   - When the battery is not charging (`0 A` charge current), **Grid Import Power equals Home Load Active Power exactly**.
-2. **In Battery Mode (`B`) / Power Outage**:
+1. **In Line Mode (`L`) / Grid Bypass with Solar (`SUB` Mode / Solar Power Balance)**:
+   When connected to the Grid while solar is generating, the inverter operates in grid-parallel blending mode:
+   - Solar energy directly powers the home load and any active battery charging first.
+   - If Solar generation is greater than or equal to total active demand ($\text{Solar} \ge \text{Load} + \text{Charging}$), Solar covers 100% of demand and Grid Import is **0 Watts**.
+   - If total demand exceeds Solar generation, the Grid seamlessly imports only the net deficit:
+     $$\text{Grid Watts} = \max(0.0, (\text{Home Load} + \text{Battery Charging Power}) - \text{Solar Power})$$
+   - At night (0W solar), the Grid carries the full load plus any battery charging.
+2. **In Battery Mode (`B`) / Off-grid / Power Outage**:
    The internal relay is physically open. Grid input is disconnected, so Grid Import Power drops to **0 Watts** immediately.
 
 This calculation matches utility billing meters to within **1–2% accuracy**.

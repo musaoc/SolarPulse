@@ -129,12 +129,18 @@ def parse_qpigs(payload: str, current_mode: str = "L") -> dict[str, Any]:
     is_grid_available = grid_v >= 90.0
     grid_status = f"{GRID_LABEL} Online" if is_grid_available else "Power Outage / Disconnected"
 
-    # Approximate imported Grid Power
-    # When in Line mode (grid bypass), Grid powers the home load plus battery charger
+    # General Energy Conservation Formula for Imported Grid Power
     if is_grid_available and current_mode in ("L", "Line", "LINE"):
+        # Total active demand = Home AC Load + Battery Charging Power
         charger_w = max(0.0, bat_v * bat_charge_a / 0.90) if bat_charge_a > 0 else 0.0
-        grid_w = round(ac_out_w + charger_w, 1)
+        total_demand = ac_out_w + charger_w
+
+        # In Line Mode with Solar Power Balance (SUB Mode):
+        # Solar supplies home load and battery charging first.
+        # Grid imports only the net deficit between total demand and solar generation.
+        grid_w = round(max(0.0, total_demand - pv_power), 1)
     else:
+        # Off-Grid / Battery Mode / Power Outage: 0.0 W imported from grid
         grid_w = 0.0
 
     return {

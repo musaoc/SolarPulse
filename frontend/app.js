@@ -251,8 +251,7 @@ function updateDashboard(data) {
   document.getElementById("flow-sub-grid").textContent = `${gridV.toFixed(1)} V • ${gridFreq.toFixed(1)} Hz`;
   document.getElementById("card-grid-v").textContent = gridV.toFixed(1);
   document.getElementById("card-grid-freq").textContent = `${gridFreq.toFixed(1)} Hz`;
-  document.getElementById("card-grid-w").textContent = `${Math.round(gridW)} W`;
-  document.getElementById("card-grid-mode").textContent = data.mode_code === "L" ? "Passthrough" : "Off-grid";
+  document.getElementById("card-grid-mode").textContent = data.mode_code === "L" ? (pvPower > 25 ? "Hybrid (SUB)" : "Passthrough") : "Off-grid";
 
   const gridTag = document.getElementById("card-grid-tag");
   if (gridAvailable) {
