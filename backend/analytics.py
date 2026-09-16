@@ -75,8 +75,42 @@ def _format_time_str(iso_or_ts: Any, epoch_val: Optional[float] = None) -> str:
         return str(iso_or_ts)
 
 
+def _compute_gap_solar(prev_ep: float, curr_ep: float, pv1: float, pv2: float) -> float:
+    """Accurately compute solar generation during an offline telemetry gap.
+    Restricts solar integration to physical daylight hours (06:00 to 18:30 local time),
+    preventing non-physical energy interpolation during nighttime hours."""
+    if pv1 <= 0 and pv2 <= 0:
+        return 0.0
+
+    try:
+        dt_start = datetime.fromtimestamp(prev_ep).astimezone()
+        dt_end = datetime.fromtimestamp(curr_ep).astimezone()
+
+        daylight_start = datetime.combine(dt_start.date(), datetime.min.time()).astimezone().replace(hour=6, minute=0, second=0)
+        daylight_end = datetime.combine(dt_start.date(), datetime.min.time()).astimezone().replace(hour=18, minute=30, second=0)
+
+        effective_start = max(dt_start, daylight_start)
+        effective_end = min(dt_end, daylight_end)
+
+        if effective_start >= effective_end:
+            return 0.0
+
+        daylight_seconds = (effective_end - effective_start).total_seconds()
+        if daylight_seconds <= 0:
+            return 0.0
+
+        p1 = pv1 if dt_start >= daylight_start else 0.0
+        p2 = pv2 if dt_end <= daylight_end else 0.0
+
+        avg_pv = (p1 + p2) / 2.0
+        return avg_pv * daylight_seconds / 3600000.0
+    except Exception:
+        return 0.0
+
+
 def compute_day_metrics(records: list[sqlite3.Row], day_str: str, tariff_rate: float) -> dict[str, Any]:
-    """Compute exact energy totals, peak timestamps, autarky %, and savings for a single day."""
+    """Compute exact energy totals, peak timestamps, autarky %, savings, and battery metrics for a single day.
+    Includes robust offline gap interpolation for home load and grid power."""
     if not records:
         return {
             "date": day_str,
@@ -101,6 +135,9 @@ def compute_day_metrics(records: list[sqlite3.Row], day_str: str, tariff_rate: f
             "grid_cost_pkr": 0.0,
             "min_soc": 0,
             "max_soc": 0,
+            "min_bat_v": 0.0,
+            "max_bat_v": 0.0,
+            "offline_gap_minutes": 0.0,
         }
 
     pv_kwh = 0.0
@@ -108,6 +145,7 @@ def compute_day_metrics(records: list[sqlite3.Row], day_str: str, tariff_rate: f
     grid_kwh = 0.0
     bat_charge_kwh = 0.0
     bat_discharge_kwh = 0.0
+    total_gap_seconds = 0.0
 
     peak_pv = 0.0
     peak_pv_ts = ""
@@ -121,17 +159,17 @@ def compute_day_metrics(records: list[sqlite3.Row], day_str: str, tariff_rate: f
 
     min_soc = 100
     max_soc = 0
-
-    prev = records[0]
+    min_bat_v = 999.0
+    max_bat_v = 0.0
 
     for r in records:
         pv_w = r["pv_power"] or 0.0
         load_w = r["load_w"] or 0.0
         grid_w = r["grid_w"] or 0.0
-        bat_net = r["bat_net_w"] or 0.0
         soc = r["bat_soc"] or 0
         ts = r["timestamp"]
         ep = r["epoch"] or 0.0
+        bat_v = r["bat_v"] if "bat_v" in r.keys() and r["bat_v"] is not None else 0.0
 
         if pv_w > peak_pv:
             peak_pv = pv_w
@@ -152,23 +190,51 @@ def compute_day_metrics(records: list[sqlite3.Row], day_str: str, tariff_rate: f
             if soc > max_soc:
                 max_soc = soc
 
-        dt = r["epoch"] - prev["epoch"]
-        if 0 < dt < 600:
-            avg_pv = ((prev["pv_power"] or 0.0) + pv_w) / 2.0
-            avg_load = ((prev["load_w"] or 0.0) + load_w) / 2.0
-            avg_grid = ((prev["grid_w"] or 0.0) + grid_w) / 2.0
-            avg_bat = ((prev["bat_net_w"] or 0.0) + bat_net) / 2.0
+        if bat_v > 5.0:
+            if bat_v < min_bat_v:
+                min_bat_v = bat_v
+            if bat_v > max_bat_v:
+                max_bat_v = bat_v
 
-            pv_kwh += avg_pv * dt / 3600000.0
-            load_kwh += avg_load * dt / 3600000.0
-            grid_kwh += avg_grid * dt / 3600000.0
+    # Trapezoidal Numerical Integration with Offline Gap Handling
+    if len(records) > 1:
+        prev = records[0]
+        for r in records[1:]:
+            dt = r["epoch"] - prev["epoch"]
+            if dt <= 0:
+                continue
 
-            if avg_bat > 0:
-                bat_charge_kwh += avg_bat * dt / 3600000.0
-            else:
-                bat_discharge_kwh += abs(avg_bat) * dt / 3600000.0
+            p_pv1, p_pv2 = (prev["pv_power"] or 0.0), (r["pv_power"] or 0.0)
+            p_load1, p_load2 = (prev["load_w"] or 0.0), (r["load_w"] or 0.0)
+            p_grid1, p_grid2 = (prev["grid_w"] or 0.0), (r["grid_w"] or 0.0)
+            p_bat1, p_bat2 = (prev["bat_net_w"] or 0.0), (r["bat_net_w"] or 0.0)
 
-        prev = r
+            avg_pv = (p_pv1 + p_pv2) / 2.0
+            avg_load = (p_load1 + p_load2) / 2.0
+            avg_grid = (p_grid1 + p_grid2) / 2.0
+            avg_bat = (p_bat1 + p_bat2) / 2.0
+
+            if dt <= 90:  # Normal polling interval
+                pv_kwh += avg_pv * dt / 3600000.0
+                load_kwh += avg_load * dt / 3600000.0
+                grid_kwh += avg_grid * dt / 3600000.0
+                if avg_bat > 0:
+                    bat_charge_kwh += avg_bat * dt / 3600000.0
+                else:
+                    bat_discharge_kwh += abs(avg_bat) * dt / 3600000.0
+            elif dt <= 12 * 3600:  # Offline gap (collector disconnected / PC asleep) up to 12h
+                total_gap_seconds += dt
+                load_kwh += avg_load * dt / 3600000.0
+                grid_kwh += avg_grid * dt / 3600000.0
+                if avg_bat > 0:
+                    bat_charge_kwh += avg_bat * dt / 3600000.0
+                else:
+                    bat_discharge_kwh += abs(avg_bat) * dt / 3600000.0
+                pv_kwh += _compute_gap_solar(prev["epoch"], r["epoch"], p_pv1, p_pv2)
+            else:  # Extended shutdown (>12h) - track gap without runaway phantom integration
+                total_gap_seconds += dt
+
+            prev = r
 
     if load_kwh > 0.01:
         autarky = max(0.0, min(100.0, ((load_kwh - grid_kwh) / load_kwh) * 100.0))
@@ -207,6 +273,9 @@ def compute_day_metrics(records: list[sqlite3.Row], day_str: str, tariff_rate: f
         "grid_cost_pkr": grid_cost,
         "min_soc": min_soc if min_soc <= 100 else 0,
         "max_soc": max_soc,
+        "min_bat_v": round(min_bat_v, 2) if min_bat_v < 900.0 else 0.0,
+        "max_bat_v": round(max_bat_v, 2),
+        "offline_gap_minutes": round(total_gap_seconds / 60.0, 1),
     }
 
 
@@ -274,7 +343,7 @@ def get_daily_analytics(
     with get_db_connection() as conn:
         records = conn.execute("""
             SELECT 
-                timestamp, epoch, pv_power, load_w, grid_w, bat_net_w, bat_soc,
+                timestamp, epoch, pv_power, load_w, grid_w, bat_net_w, bat_soc, bat_v,
                 date(epoch, 'unixepoch', 'localtime') as local_day
             FROM telemetry_history
             WHERE epoch >= ? AND epoch <= ?
@@ -512,6 +581,7 @@ def get_day_hourly_profile(day_str: str) -> dict[str, Any]:
         """, (d_start, d_end)).fetchall()
 
     hours_data = {r["hour"]: dict(r) for r in records}
+    known_hours = sorted(hours_data.keys())
 
     labels = []
     pv_series = []
@@ -528,10 +598,31 @@ def get_day_hourly_profile(day_str: str) -> dict[str, Any]:
             grid_series.append(hours_data[h]["avg_grid_w"] or 0.0)
             soc_series.append(hours_data[h]["avg_soc"] or 0)
         else:
-            pv_series.append(0.0)
-            load_series.append(0.0)
-            grid_series.append(0.0)
-            soc_series.append(0)
+            h_prev = max([k for k in known_hours if k < h], default=None)
+            h_next = min([k for k in known_hours if k > h], default=None)
+            if h_prev is not None and h_next is not None and (h_next - h_prev) <= 12:
+                w = (h - h_prev) / (h_next - h_prev)
+                interp_load = round((hours_data[h_prev]["avg_load_w"] or 0.0) + w * ((hours_data[h_next]["avg_load_w"] or 0.0) - (hours_data[h_prev]["avg_load_w"] or 0.0)), 1)
+                interp_grid = round((hours_data[h_prev]["avg_grid_w"] or 0.0) + w * ((hours_data[h_next]["avg_grid_w"] or 0.0) - (hours_data[h_prev]["avg_grid_w"] or 0.0)), 1)
+                interp_soc = round((hours_data[h_prev]["avg_soc"] or 0) + w * ((hours_data[h_next]["avg_soc"] or 0) - (hours_data[h_prev]["avg_soc"] or 0)))
+
+                # Solar interpolation only permitted within daylight window (06:00 to 18:30)
+                if 6 <= h <= 18:
+                    p1 = hours_data[h_prev]["avg_pv_w"] or 0.0 if 6 <= h_prev <= 18 else 0.0
+                    p2 = hours_data[h_next]["avg_pv_w"] or 0.0 if 6 <= h_next <= 18 else 0.0
+                    interp_pv = round(p1 + w * (p2 - p1), 1)
+                else:
+                    interp_pv = 0.0
+
+                pv_series.append(max(0.0, interp_pv))
+                load_series.append(max(0.0, interp_load))
+                grid_series.append(max(0.0, interp_grid))
+                soc_series.append(max(0, interp_soc))
+            else:
+                pv_series.append(0.0)
+                load_series.append(0.0)
+                grid_series.append(0.0)
+                soc_series.append(0)
 
     return {
         "date": day_str,

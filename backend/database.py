@@ -141,125 +141,27 @@ def get_historical_telemetry(time_range: str = "1h") -> list[dict[str, Any]]:
 
 
 def get_today_summary() -> dict[str, Any]:
-    """Compute today's aggregate statistics and energy totals (kWh) in user's local timezone."""
-    now_local = datetime.now()
-    today_start = datetime.combine(now_local.date(), datetime.min.time()).astimezone().timestamp()
-    today_end = datetime.combine(now_local.date(), datetime.max.time()).astimezone().timestamp()
+    """Compute today's aggregate statistics and energy totals (kWh) in user's local timezone.
+    Delegates directly to the centralized analytics engine to ensure 100% mathematical consistency."""
+    from .analytics import get_daily_analytics
 
-    with get_db_connection() as conn:
-        cursor = conn.execute("""
-            SELECT 
-                COUNT(*) as count,
-                MAX(pv_power) as peak_pv_w,
-                MAX(load_w) as peak_load_w,
-                MIN(bat_v) as min_bat_v,
-                MAX(bat_v) as max_bat_v,
-                MIN(bat_soc) as min_bat_soc,
-                MAX(bat_soc) as max_bat_soc,
-                AVG(pv_power) as avg_pv_w,
-                AVG(load_w) as avg_load_w,
-                AVG(grid_w) as avg_grid_w
-            FROM telemetry_history
-            WHERE epoch >= ? AND epoch <= ?
-        """, (today_start, today_end))
-        row = dict(cursor.fetchone() or {})
-        
-        count = row.get("count", 0)
-
-        peak_pv_val = row.get("peak_pv_w") or 0.0
-        peak_load_val = row.get("peak_load_w") or 0.0
-        peak_pv_time = "--"
-        peak_load_time = "--"
-
-        if peak_pv_val > 0:
-            p_row = conn.execute(
-                "SELECT epoch FROM telemetry_history WHERE epoch >= ? AND epoch <= ? AND pv_power = ? ORDER BY epoch ASC LIMIT 1",
-                (today_start, today_end, peak_pv_val)
-            ).fetchone()
-            if p_row and p_row["epoch"]:
-                peak_pv_time = datetime.fromtimestamp(p_row["epoch"]).astimezone().strftime("%H:%M")
-
-        if peak_load_val > 0:
-            l_row = conn.execute(
-                "SELECT epoch FROM telemetry_history WHERE epoch >= ? AND epoch <= ? AND load_w = ? ORDER BY epoch ASC LIMIT 1",
-                (today_start, today_end, peak_load_val)
-            ).fetchone()
-            if l_row and l_row["epoch"]:
-                peak_load_time = datetime.fromtimestamp(l_row["epoch"]).astimezone().strftime("%H:%M")
-        
-        # Energy numerical integration
-        cursor = conn.execute("""
-            SELECT 
-                pv_power, load_w, grid_w, bat_net_w, epoch
-            FROM telemetry_history
-            WHERE epoch >= ? AND epoch <= ?
-            ORDER BY epoch ASC
-        """, (today_start, today_end))
-        records = cursor.fetchall()
-
-    pv_kwh = 0.0
-    load_kwh = 0.0
-    grid_kwh = 0.0
-    bat_charge_kwh = 0.0
-    bat_discharge_kwh = 0.0
-    total_gap_seconds = 0.0
-
-    if len(records) > 1:
-        prev_r = records[0]
-        for r in records[1:]:
-            dt = r["epoch"] - prev_r["epoch"]
-            if dt <= 0:
-                continue
-
-            p_pv1, p_pv2 = (prev_r["pv_power"] or 0.0), (r["pv_power"] or 0.0)
-            p_load1, p_load2 = (prev_r["load_w"] or 0.0), (r["load_w"] or 0.0)
-            p_grid1, p_grid2 = (prev_r["grid_w"] or 0.0), (r["grid_w"] or 0.0)
-            p_bat1, p_bat2 = (prev_r["bat_net_w"] or 0.0), (r["bat_net_w"] or 0.0)
-
-            avg_pv = (p_pv1 + p_pv2) / 2.0
-            avg_load = (p_load1 + p_load2) / 2.0
-            avg_grid = (p_grid1 + p_grid2) / 2.0
-            avg_bat = (p_bat1 + p_bat2) / 2.0
-
-            if dt > 90:  # Offline gap
-                total_gap_seconds += dt
-                load_kwh += avg_load * dt / 3600000.0
-                grid_kwh += avg_grid * dt / 3600000.0
-
-                start_hour = datetime.fromtimestamp(prev_r["epoch"]).astimezone().hour
-                end_hour = datetime.fromtimestamp(r["epoch"]).astimezone().hour
-                if p_pv1 > 0 or p_pv2 > 0 or (6 <= start_hour <= 18 or 6 <= end_hour <= 18):
-                    pv_kwh += avg_pv * dt / 3600000.0
-
-                if avg_bat > 0:
-                    bat_charge_kwh += avg_bat * dt / 3600000.0
-                else:
-                    bat_discharge_kwh += abs(avg_bat) * dt / 3600000.0
-            else:
-                pv_kwh += avg_pv * dt / 3600000.0
-                load_kwh += avg_load * dt / 3600000.0
-                grid_kwh += avg_grid * dt / 3600000.0
-                if avg_bat > 0:
-                    bat_charge_kwh += avg_bat * dt / 3600000.0
-                else:
-                    bat_discharge_kwh += abs(avg_bat) * dt / 3600000.0
-
-            prev_r = r
+    analytics = get_daily_analytics(range_type="today")
+    today_metric = analytics["daily"][0] if analytics.get("daily") else {}
 
     return {
-        "today_pv_energy_kwh": round(pv_kwh, 2),
-        "today_load_energy_kwh": round(load_kwh, 2),
-        "today_grid_energy_kwh": round(grid_kwh, 2),
-        "today_battery_charge_kwh": round(bat_charge_kwh, 2),
-        "today_battery_discharge_kwh": round(bat_discharge_kwh, 2),
-        "peak_pv_w": round(peak_pv_val, 1),
-        "peak_pv_time": peak_pv_time,
-        "peak_load_w": round(peak_load_val, 1),
-        "peak_load_time": peak_load_time,
-        "min_bat_v": round(row.get("min_bat_v") or 0.0, 2),
-        "max_bat_v": round(row.get("max_bat_v") or 0.0, 2),
-        "min_bat_soc": row.get("min_bat_soc") or 0,
-        "max_bat_soc": row.get("max_bat_soc") or 0,
-        "sample_count": count,
-        "offline_gap_minutes": round(total_gap_seconds / 60.0, 1),
+        "today_pv_energy_kwh": today_metric.get("pv_kwh", 0.0),
+        "today_load_energy_kwh": today_metric.get("load_kwh", 0.0),
+        "today_grid_energy_kwh": today_metric.get("grid_kwh", 0.0),
+        "today_battery_charge_kwh": today_metric.get("bat_charge_kwh", 0.0),
+        "today_battery_discharge_kwh": today_metric.get("bat_discharge_kwh", 0.0),
+        "peak_pv_w": today_metric.get("peak_pv_w", 0.0),
+        "peak_pv_time": today_metric.get("peak_pv_time", "--"),
+        "peak_load_w": today_metric.get("peak_load_w", 0.0),
+        "peak_load_time": today_metric.get("peak_load_time", "--"),
+        "min_bat_v": today_metric.get("min_bat_v", 0.0),
+        "max_bat_v": today_metric.get("max_bat_v", 0.0),
+        "min_bat_soc": today_metric.get("min_soc", 0),
+        "max_bat_soc": today_metric.get("max_soc", 0),
+        "sample_count": today_metric.get("samples", 0),
+        "offline_gap_minutes": today_metric.get("offline_gap_minutes", 0.0),
     }
