@@ -211,6 +211,16 @@ function updateDashboard(data) {
   document.getElementById("card-load-ac").textContent = `${outV.toFixed(1)} V @ ${outFreq.toFixed(0)} Hz`;
   document.getElementById("card-load-bar").style.width = `${Math.min(100, loadPct)}%`;
 
+  const loadTag = document.getElementById("card-load-tag");
+  if (loadTag) {
+    let loadLevel = "Normal";
+    if (loadPct > 75) loadLevel = "High";
+    if (loadPct > 90) loadLevel = "Warning";
+    if (loadPct > 100) loadLevel = "Overload";
+    loadTag.textContent = `${loadLevel} (${loadPct}%)`;
+    loadTag.className = loadPct > 75 ? "card-tag tag-load" : "card-tag tag-load";
+  }
+
   // Battery Metrics
   const batSoc = data.battery_soc || 0;
   const batV = data.battery_voltage || 0;
@@ -251,6 +261,7 @@ function updateDashboard(data) {
   document.getElementById("flow-sub-grid").textContent = `${gridV.toFixed(1)} V • ${gridFreq.toFixed(1)} Hz`;
   document.getElementById("card-grid-v").textContent = gridV.toFixed(1);
   document.getElementById("card-grid-freq").textContent = `${gridFreq.toFixed(1)} Hz`;
+  document.getElementById("card-grid-w").textContent = `${Math.round(gridW)} W`;
   document.getElementById("card-grid-mode").textContent = data.mode_code === "L" ? (pvPower > 25 ? "Hybrid (SUB)" : "Passthrough") : "Off-grid";
 
   const gridTag = document.getElementById("card-grid-tag");
@@ -268,6 +279,11 @@ function updateDashboard(data) {
   document.getElementById("inverter-temp-badge").textContent = `${temp}°C`;
   document.getElementById("inverter-bus-badge").textContent = `${busV}V Bus`;
   document.getElementById("card-temp").textContent = `${temp} °C`;
+
+  if (data.collector_pn) {
+    const donglePnEl = document.getElementById("footer-dongle-pn");
+    if (donglePnEl) donglePnEl.textContent = data.collector_pn;
+  }
 
   // Update SVG Flow Physics
   updateFlowPipes({

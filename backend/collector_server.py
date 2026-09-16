@@ -150,14 +150,25 @@ class CollectorServer:
         logger.info("Collector TCP Server stopped")
 
     def _send_udp_redirect(self):
-        """Send unicast redirect packet to dongle IP."""
+        """Send unicast and subnet broadcast redirect packets to dongle."""
         cmd = f"set>server={HOST_IP}:{TCP_PORT};".encode("ascii")
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             sock.settimeout(1.0)
-            sock.sendto(cmd, (self.dongle_ip, self.dongle_udp_port))
+            # 1. Direct unicast to configured/detected dongle IP
+            if self.dongle_ip:
+                try:
+                    sock.sendto(cmd, (self.dongle_ip, self.dongle_udp_port))
+                except Exception as ex_uni:
+                    logger.debug("Unicast UDP send failed: %s", ex_uni)
+            # 2. Local subnet broadcast for zero-config auto-discovery
+            try:
+                sock.sendto(cmd, ("255.255.255.255", self.dongle_udp_port))
+            except Exception as ex_bc:
+                logger.debug("Broadcast UDP send failed: %s", ex_bc)
             sock.close()
-            logger.debug("Sent UDP redirect to %s:%d -> %s", self.dongle_ip, self.dongle_udp_port, cmd.decode())
+            logger.debug("Sent UDP redirect to %s and broadcast:58899 -> %s", self.dongle_ip, cmd.decode())
         except Exception as e:
             logger.warning("UDP redirect error: %s", e)
 
