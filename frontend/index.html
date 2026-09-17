@@ -57,6 +57,10 @@
           <span class="cloud-icon">☁️</span> Cloud Sync
           <span class="cloud-status-dot" id="header-cloud-dot"></span>
         </button>
+        <button class="btn-scheduler" id="btn-open-scheduler" title="Inverter Output Mode & Daily Scheduler">
+          <span class="scheduler-icon">⏰</span> Mode & Schedule
+          <span class="scheduler-status-pill" id="header-scheduler-pill">SBU</span>
+        </button>
       </div>
 
       <div class="header-right-meta">
@@ -77,6 +81,11 @@
           <div class="mode-badge" id="operating-mode-badge">
             <span class="mode-icon">🔄</span>
             <span id="mode-name">LINE MODE (GRID)</span>
+          </div>
+          <div class="priority-badge" id="output-priority-badge" title="Click to view or change Output Priority (SUB / SBU)">
+            <span class="priority-icon">⚡</span>
+            <span class="priority-label">Priority:</span>
+            <span class="priority-val" id="output-priority-text">SBU</span>
           </div>
         </div>
 
@@ -545,6 +554,91 @@
       <div class="modal-footer">
         <button class="btn-secondary" id="btn-trigger-sync">🔄 Sync Now</button>
         <button class="btn-primary" id="btn-save-cloud">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inverter Mode & Daily Scheduler Modal -->
+  <div class="modal-overlay" id="scheduler-modal" style="display: none;">
+    <div class="modal-card glass-panel modal-card-scheduler">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">⏰</span>
+          <div>
+            <div class="modal-title">Inverter Mode & Auto-Scheduler</div>
+            <div class="modal-subtitle">Switch output priority & automate daily transitions</div>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="btn-close-scheduler">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Live Mode Display & Quick Switch -->
+        <div class="scheduler-section">
+          <div class="section-badge-title">CURRENT INVERTER PRIORITY</div>
+          <div class="current-mode-card">
+            <div class="current-mode-info">
+              <div class="current-mode-val" id="modal-current-mode">SBU Priority</div>
+              <div class="current-mode-desc" id="modal-current-desc">Solar &rarr; Battery &rarr; Utility (Self-consumption)</div>
+            </div>
+            <div class="mode-status-indicator pulse-active" id="modal-mode-indicator"></div>
+          </div>
+
+          <div class="manual-switch-group">
+            <div class="switch-group-label">Manual Mode Override (Instant):</div>
+            <div class="switch-buttons-row">
+              <button class="btn-mode-switch" id="btn-switch-sub" data-mode="SUB">
+                <span class="btn-mode-icon">⚡</span>
+                <span class="btn-mode-text">Switch to <strong>SUB</strong></span>
+                <span class="btn-mode-sub">Solar &rarr; Utility &rarr; Battery</span>
+              </button>
+              <button class="btn-mode-switch" id="btn-switch-sbu" data-mode="SBU">
+                <span class="btn-mode-icon">🔋</span>
+                <span class="btn-mode-text">Switch to <strong>SBU</strong></span>
+                <span class="btn-mode-sub">Solar &rarr; Battery &rarr; Utility</span>
+              </button>
+            </div>
+            <div class="switch-feedback" id="switch-feedback" style="display: none;"></div>
+          </div>
+        </div>
+
+        <hr class="modal-divider" />
+
+        <!-- Auto-Scheduler Section -->
+        <div class="scheduler-section">
+          <div class="section-badge-title">DAILY AUTOMATED SCHEDULE</div>
+
+          <div class="form-group-toggle">
+            <div>
+              <label for="scheduler-enabled" class="toggle-label">Enable Daily Auto-Scheduler</label>
+              <small class="field-hint">Triggers once per slot (Local Time). Manual changes made in between are preserved.</small>
+            </div>
+            <input type="checkbox" id="scheduler-enabled" class="toggle-input">
+          </div>
+
+          <div class="schedule-status-banner" id="schedule-status-banner">
+            <span class="banner-icon" id="schedule-banner-icon">ℹ️</span>
+            <span class="banner-text" id="schedule-status-text">Auto-Scheduler is currently OFF.</span>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="schedule-evening-time">Evening Switch to SUB</label>
+              <input type="time" id="schedule-evening-time" value="18:00" class="input-field">
+              <small class="field-hint">Default 18:00 (Sunset / Evening mode)</small>
+            </div>
+            <div class="form-group">
+              <label for="schedule-morning-time">Morning Switch to SBU</label>
+              <input type="time" id="schedule-morning-time" value="06:00" class="input-field">
+              <small class="field-hint">Default 06:00 (Sunrise / Day mode)</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btn-cancel-scheduler">Cancel</button>
+        <button class="btn-primary" id="btn-save-scheduler">Save Schedule Settings</button>
       </div>
     </div>
   </div>

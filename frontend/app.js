@@ -22,6 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadSummary();
   initMqttModal();
   initCloudModal();
+  initSchedulerModal();
   setInterval(loadSummary, 10000);
 });
 
@@ -174,6 +175,20 @@ function updateDashboard(data) {
       modeBadge.style.background = "rgba(99, 102, 241, 0.15)";
       modeBadge.style.borderColor = "rgba(99, 102, 241, 0.4)";
       modeBadge.style.color = "#a5b4fc";
+    }
+  }
+
+  // Output Priority (SUB / SBU)
+  if (data.output_priority) {
+    const priorityText = document.getElementById("output-priority-text");
+    const headerPill = document.getElementById("header-scheduler-pill");
+    if (priorityText) {
+      priorityText.textContent = data.output_priority;
+      priorityText.className = "priority-val " + data.output_priority.toLowerCase();
+    }
+    if (headerPill) {
+      headerPill.textContent = data.output_priority;
+      headerPill.className = "scheduler-status-pill " + data.output_priority.toLowerCase();
     }
   }
 
@@ -981,6 +996,197 @@ function initCloudModal() {
 
   refreshCloudStatus();
   setInterval(refreshCloudStatus, 30000);
+}
+
+// -----------------------------------------------------------------------------
+// Inverter Output Mode & Daily Scheduler Controller
+// -----------------------------------------------------------------------------
+function initSchedulerModal() {
+  const modal = document.getElementById("scheduler-modal");
+  const openBtn = document.getElementById("btn-open-scheduler");
+  const badgeBtn = document.getElementById("output-priority-badge");
+  const closeBtn = document.getElementById("btn-close-scheduler");
+  const cancelBtn = document.getElementById("btn-cancel-scheduler");
+  const saveBtn = document.getElementById("btn-save-scheduler");
+
+  const headerPill = document.getElementById("header-scheduler-pill");
+  const priorityText = document.getElementById("output-priority-text");
+  const currentModeEl = document.getElementById("modal-current-mode");
+  const currentDescEl = document.getElementById("modal-current-desc");
+  const indicatorEl = document.getElementById("modal-mode-indicator");
+
+  const btnSub = document.getElementById("btn-switch-sub");
+  const btnSbu = document.getElementById("btn-switch-sbu");
+  const feedbackEl = document.getElementById("switch-feedback");
+
+  const enabledInput = document.getElementById("scheduler-enabled");
+  const eveningInput = document.getElementById("schedule-evening-time");
+  const morningInput = document.getElementById("schedule-morning-time");
+  const statusBanner = document.getElementById("schedule-status-banner");
+  const statusText = document.getElementById("schedule-status-text");
+
+  async function refreshSchedulerStatus() {
+    try {
+      const res = await fetch("/api/scheduler/status");
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const code = data.current_priority_code || "Unknown";
+      const name = data.current_priority_name || (code + " Priority");
+
+      if (headerPill) {
+        headerPill.textContent = code;
+        headerPill.className = "scheduler-status-pill " + code.toLowerCase();
+      }
+      if (priorityText) {
+        priorityText.textContent = code;
+        priorityText.className = "priority-val " + code.toLowerCase();
+      }
+      if (currentModeEl) {
+        currentModeEl.textContent = name;
+      }
+      if (currentDescEl) {
+        if (code === "SUB") {
+          currentDescEl.textContent = "Solar → Utility → Battery (Preserves battery for outages)";
+        } else if (code === "SBU") {
+          currentDescEl.textContent = "Solar → Battery → Utility (Maximizes self-consumption)";
+        } else if (code === "UTI") {
+          currentDescEl.textContent = "Utility First → Solar → Battery (Grid priority)";
+        } else {
+          currentDescEl.textContent = "Reading hardware register...";
+        }
+      }
+
+      if (indicatorEl) {
+        indicatorEl.className = "mode-status-indicator " + code.toLowerCase();
+      }
+
+      // Highlight active mode button
+      if (btnSub && btnSbu) {
+        btnSub.classList.toggle("active", code === "SUB");
+        btnSbu.classList.toggle("active", code === "SBU");
+      }
+
+      // Populate config form
+      if (enabledInput) enabledInput.checked = Boolean(data.enabled);
+      if (eveningInput && data.evening_time) eveningInput.value = data.evening_time;
+      if (morningInput && data.morning_time) morningInput.value = data.morning_time;
+
+      // Status banner
+      if (statusBanner && statusText) {
+        if (data.enabled) {
+          statusBanner.className = "schedule-status-banner active";
+          statusText.innerHTML = `<strong>Auto-Scheduler Active:</strong> Next transition to <strong>${data.next_event_mode}</strong> at <strong>${data.next_event_time}</strong> (${data.countdown_human} left).`;
+        } else {
+          statusBanner.className = "schedule-status-banner";
+          statusText.textContent = "Auto-Scheduler is currently OFF.";
+        }
+      }
+    } catch (err) {
+      console.debug("Failed to fetch scheduler status:", err);
+    }
+  }
+
+  function showFeedback(msg, type = "success") {
+    if (!feedbackEl) return;
+    feedbackEl.textContent = msg;
+    feedbackEl.className = "switch-feedback " + type;
+    feedbackEl.style.display = "block";
+    setTimeout(() => {
+      feedbackEl.style.display = "none";
+    }, 6000);
+  }
+
+  async function handleManualSwitch(targetMode) {
+    if (btnSub) btnSub.disabled = true;
+    if (btnSbu) btnSbu.disabled = true;
+    showFeedback(`Sending command to set inverter to ${targetMode}...`, "info");
+
+    try {
+      const res = await fetch("/api/inverter/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: targetMode }),
+      });
+      const data = await res.json();
+      if (res.ok && data.status === "ok") {
+        showFeedback(`Inverter successfully switched to ${targetMode}! (ACK)`, "success");
+        await refreshSchedulerStatus();
+      } else {
+        showFeedback(`Failed to switch mode: ${data.detail || data.error || "Unknown error"}`, "error");
+      }
+    } catch (err) {
+      showFeedback(`Switch error: ${err.message}`, "error");
+    } finally {
+      if (btnSub) btnSub.disabled = false;
+      if (btnSbu) btnSbu.disabled = false;
+    }
+  }
+
+  if (btnSub) {
+    btnSub.addEventListener("click", () => handleManualSwitch("SUB"));
+  }
+  if (btnSbu) {
+    btnSbu.addEventListener("click", () => handleManualSwitch("SBU"));
+  }
+
+  function openModal() {
+    if (modal) {
+      modal.style.display = "flex";
+      refreshSchedulerStatus();
+    }
+  }
+
+  function closeModal() {
+    if (modal) modal.style.display = "none";
+  }
+
+  if (openBtn) openBtn.addEventListener("click", openModal);
+  if (badgeBtn) badgeBtn.addEventListener("click", openModal);
+  if (closeBtn) closeBtn.addEventListener("click", closeModal);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeModal();
+    });
+  }
+
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving...";
+
+      const payload = {
+        enabled: enabledInput.checked,
+        evening_time: eveningInput.value.trim() || "18:00",
+        morning_time: morningInput.value.trim() || "06:00",
+      };
+
+      try {
+        const res = await fetch("/api/scheduler/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          await refreshSchedulerStatus();
+          closeModal();
+        } else {
+          const err = await res.json();
+          alert(`Failed to save scheduler settings: ${err.detail || "Error"}`);
+        }
+      } catch (err) {
+        alert(`Error saving scheduler settings: ${err.message}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save Schedule Settings";
+      }
+    });
+  }
+
+  // Initial fetch and regular background refresh
+  refreshSchedulerStatus();
+  setInterval(refreshSchedulerStatus, 10000);
 }
 
 

@@ -38,6 +38,7 @@ solar_history.db
 cloud_config.json
 mqtt_config.json
 tariff_config.json
+scheduler_config.json
 
 # Logs
 *.log
@@ -52,3 +53,8 @@ Thumbs.db
 *.local.md
 *.backup
 system_profile.md
+
+# Inverter Mode Scheduler (Automation)
+inverter_mode_scheduler.py
+start_inverter_scheduler.bat
+.scheduler_state.json

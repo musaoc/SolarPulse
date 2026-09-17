@@ -31,6 +31,7 @@ from .config import BASE_DIR, DEFAULT_CURRENCY, FRONTEND_DIR, WEB_PORT
 from .database import get_historical_telemetry, get_today_summary, init_db
 from .mqtt_publisher import mqtt_manager
 from .poller import TelemetryPoller
+from .scheduler import InverterScheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +43,7 @@ MQTT_CONFIG_FILE = BASE_DIR / "mqtt_config.json"
 
 collector = CollectorServer()
 poller = TelemetryPoller(collector)
+scheduler = InverterScheduler(collector)
 
 
 def load_persisted_mqtt_config():
@@ -70,9 +72,10 @@ async def lifespan(app: FastAPI):
     logger.info("Starting SolarPulse Backend...")
     init_db()
 
-    # Start collector and poller
+    # Start collector, poller, and scheduler
     await collector.start()
     await poller.start()
+    await scheduler.start()
 
     # Load and initialize MQTT if configured
     load_persisted_mqtt_config()
@@ -83,6 +86,7 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down SolarPulse Backend...")
+    await scheduler.stop()
     mqtt_manager.stop()
     await poller.stop()
     await collector.stop()
@@ -120,7 +124,11 @@ class MqttConfigRequest(BaseModel):
 @app.get("/api/live")
 async def get_live_data() -> dict[str, Any]:
     """Return the most recent telemetry snapshot."""
-    return poller.latest_telemetry
+    data = dict(poller.latest_telemetry)
+    data["output_priority"] = scheduler.current_priority_code
+    data["output_priority_name"] = scheduler.current_priority_name
+    data["scheduler_enabled"] = scheduler.enabled
+    return data
 
 
 @app.get("/api/history")
@@ -219,6 +227,43 @@ async def send_custom_command(cmd: str = "QPIGS") -> dict[str, Any]:
         return {"cmd": cmd, "response": raw, "status": "ok"}
     except Exception as e:
         return {"cmd": cmd, "error": str(e), "status": "error"}
+
+
+class SchedulerConfigRequest(BaseModel):
+    enabled: Optional[bool] = None
+    evening_time: Optional[str] = None
+    morning_time: Optional[str] = None
+
+
+class InverterModeRequest(BaseModel):
+    mode: str  # SUB, SBU, UTI
+
+
+@app.get("/api/scheduler/status")
+async def get_scheduler_status() -> dict[str, Any]:
+    """Get current scheduler configuration, countdown, and active inverter priority."""
+    return scheduler.get_status()
+
+
+@app.post("/api/scheduler/config")
+async def set_scheduler_config(req: SchedulerConfigRequest) -> dict[str, Any]:
+    """Update scheduler configuration (toggle on/off, transition times)."""
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    try:
+        status = await scheduler.update_config(updates)
+        return {"status": "ok", "config": status}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/inverter/mode")
+async def set_inverter_mode(req: InverterModeRequest) -> dict[str, Any]:
+    """Manually switch inverter output priority (SUB, SBU, UTI)."""
+    try:
+        res = await scheduler.set_mode(req.mode)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/cloud/status")
